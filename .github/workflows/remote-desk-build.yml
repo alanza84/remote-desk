@@ -17,6 +17,10 @@ on:
         type: boolean
         required: false
         default: true
+      platforms:
+        description: "Which clients to build: all, or a comma-separated list of windows,macos,android,ios"
+        required: false
+        default: "all"
 
 permissions:
   contents: write
@@ -50,6 +54,7 @@ jobs:
     uses: ./.github/workflows/bridge.yml
 
   build-topmost-window:
+    if: ${{ inputs.platforms == 'all' || contains(format(',{0},', replace(inputs.platforms, ' ', '')), ',windows,') }}
     uses: ./.github/workflows/third-party-RustDeskTempTopMostWindow.yml
     strategy:
       fail-fast: false
@@ -65,6 +70,7 @@ jobs:
       target_version: Windows10
 
   build-windows:
+    if: ${{ inputs.platforms == 'all' || contains(format(',{0},', replace(inputs.platforms, ' ', '')), ',windows,') }}
     name: windows-${{ matrix.job.arch }}
     needs: [build-topmost-window, generate-bridge]
     runs-on: ${{ matrix.job.os }}
@@ -273,7 +279,8 @@ jobs:
       - name: Build msi
         run: |
           pushd ./res/msi
-          python preprocess.py --arp -d ../../rustdesk --app-name "Remote Desk"
+          python preprocess.py --arp -d ../../rustdesk --app-name "Remote Desk" --version $env:VERSION
+          if ($LASTEXITCODE -ne 0) { throw "preprocess.py failed with exit code $LASTEXITCODE" }
           nuget restore msi.sln
           $msiPlatform = if ('${{ matrix.job.arch }}' -eq 'aarch64') { 'ARM64' } else { 'x64' }
           msbuild msi.sln -p:Configuration=Release -p:Platform=$msiPlatform /p:TargetVersion=Windows10
@@ -291,6 +298,7 @@ jobs:
           if-no-files-found: error
 
   build-macos:
+    if: ${{ inputs.platforms == 'all' || contains(format(',{0},', replace(inputs.platforms, ' ', '')), ',macos,') }}
     name: macos-${{ matrix.job.arch }}
     needs: [generate-bridge]
     runs-on: ${{ matrix.job.os }}
@@ -391,6 +399,10 @@ jobs:
       - name: Setup vcpkg with Github Actions binary cache
         uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11
         with:
+          # Keep vcpkg out of the repo checkout. Using ./vcpkg makes
+          # lukka/run-vcpkg run `git submodule status` against a path that
+          # is not a submodule (harmless pathspec error, then a fallback clone).
+          vcpkgDirectory: ${{ runner.temp }}/vcpkg
           vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
           doNotCache: false
 
@@ -442,6 +454,7 @@ jobs:
           if-no-files-found: error
 
   build-android:
+    if: ${{ inputs.platforms == 'all' || contains(format(',{0},', replace(inputs.platforms, ' ', '')), ',android,') }}
     name: android-${{ matrix.job.arch }}
     needs: [generate-bridge]
     runs-on: ubuntu-24.04
@@ -597,6 +610,7 @@ jobs:
           if-no-files-found: error
 
   build-ios:
+    if: ${{ inputs.platforms == 'all' || contains(format(',{0},', replace(inputs.platforms, ' ', '')), ',ios,') }}
     name: ios-aarch64
     needs: [generate-bridge]
     runs-on: macos-latest
@@ -632,6 +646,10 @@ jobs:
       - name: Setup vcpkg with Github Actions binary cache
         uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11
         with:
+          # Keep vcpkg out of the repo checkout. Using ./vcpkg makes
+          # lukka/run-vcpkg run `git submodule status` against a path that
+          # is not a submodule (harmless pathspec error, then a fallback clone).
+          vcpkgDirectory: ${{ runner.temp }}/vcpkg
           vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
           doNotCache: false
 
@@ -709,7 +727,12 @@ jobs:
   publish-draft-release:
     name: publish-draft-release
     needs: [build-windows, build-macos, build-android, build-ios]
-    if: ${{ always() && !cancelled() && inputs.upload-release }}
+    if: >-
+      ${{ always() && !cancelled() && inputs.upload-release
+          && (needs.build-windows.result == 'success'
+              || needs.build-macos.result == 'success'
+              || needs.build-android.result == 'success'
+              || needs.build-ios.result == 'success') }}
     runs-on: ubuntu-24.04
     steps:
       - name: Download all build artifacts
@@ -722,20 +745,20 @@ jobs:
       - name: List artifacts
         run: find artifacts -type f -ls || true
 
-      - name: Publish draft GitHub Release
-        uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
-        with:
-          draft: true
-          prerelease: true
-          tag_name: ${{ env.TAG_NAME }}
-          name: Remote Desk ${{ env.VERSION }}
-          files: artifacts/**
-          fail_on_unmatched_files: false
-          body: |
-            Unsigned/debug-signed Remote Desk ${{ env.VERSION }} builds from this fork.
-            Baked-in servers: ID `rd.antonlanza.us`, relay `rd.antonlanza.us:21117`, API `https://desk.antonlanza.us`.
-
-            Notes:
-            - Windows and Android are installable as-is (Android is signed with the public debug key).
-            - macOS DMGs are unsigned; right-click the app and choose Open, or `xattr -cr` the app.
-            - The iOS IPA is unsigned and is meant for sideloading (7-day limit without a paid Apple Developer account).
+      - name: Attach artifacts to draft release without removing existing assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(find artifacts -type f | sort)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No artifacts to upload"
+            exit 1
+          fi
+          if ! gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            gh release create "$TAG_NAME" --draft --prerelease               --title "Remote Desk ${VERSION}"               --notes "Unsigned/debug-signed Remote Desk ${VERSION} builds from this fork."
+          fi
+          # --clobber overwrites same-named files only; other assets (e.g. Android/iOS
+          # already on this draft) are left in place.
+          gh release upload "$TAG_NAME" "${files[@]}" --clobber
+          gh release view "$TAG_NAME" --json assets --jq '.assets[].name'

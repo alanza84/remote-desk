@@ -243,7 +243,13 @@ def put_app_exe_on_media2():
 
 def gen_pre_vars(args, dist_dir):
     def func(lines, index_start):
-        upgrade_code = uuid.uuid5(uuid.NAMESPACE_OID, app_name + ".exe")
+        # Remote Desk has a fixed UpgradeCode so later releases upgrade each
+        # other and never share official RustDesk's (uuid5(..., "RustDesk.exe")).
+        # Value is uuid5(NAMESPACE_OID, "us.antonlanza.remotedesk").
+        if app_name in ("Remote Desk", "RemoteDesk"):
+            upgrade_code = "6832f0b6-9248-5697-b1af-42008166837b"
+        else:
+            upgrade_code = uuid.uuid5(uuid.NAMESPACE_OID, app_name + ".exe")
 
         indent = g_indent_unit * 1
         to_insert_lines = [
@@ -462,13 +468,17 @@ def prepare_resources():
 
 def init_global_vars(dist_dir, app_name, args):
     dist_app = dist_dir.joinpath(app_name + ".exe")
+    if not dist_app.is_file():
+        print(f"Error: app executable not found: {dist_app}")
+        return False
 
-    def read_process_output(args):
+    def read_process_output(flag):
+        # List form (no shell) so paths like "Remote Desk.exe" are not split.
         process = subprocess.Popen(
-            f"{dist_app} {args}",
+            [str(dist_app), flag],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            shell=True,
+            shell=False,
         )
         output, _ = process.communicate()
         return output.decode("utf-8").strip()
