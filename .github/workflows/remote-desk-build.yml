@@ -54,7 +54,7 @@ jobs:
     uses: ./.github/workflows/bridge.yml
 
   build-topmost-window:
-    if: ${{ inputs.platforms == 'all' || contains(format(',{0},', replace(inputs.platforms, ' ', '')), ',windows,') }}
+    if: ${{ inputs.platforms == 'all' || contains(inputs.platforms, 'windows') }}
     uses: ./.github/workflows/third-party-RustDeskTempTopMostWindow.yml
     strategy:
       fail-fast: false
@@ -70,7 +70,7 @@ jobs:
       target_version: Windows10
 
   build-windows:
-    if: ${{ inputs.platforms == 'all' || contains(format(',{0},', replace(inputs.platforms, ' ', '')), ',windows,') }}
+    if: ${{ inputs.platforms == 'all' || contains(inputs.platforms, 'windows') }}
     name: windows-${{ matrix.job.arch }}
     needs: [build-topmost-window, generate-bridge]
     runs-on: ${{ matrix.job.os }}
@@ -298,7 +298,7 @@ jobs:
           if-no-files-found: error
 
   build-macos:
-    if: ${{ inputs.platforms == 'all' || contains(format(',{0},', replace(inputs.platforms, ' ', '')), ',macos,') }}
+    if: ${{ inputs.platforms == 'all' || contains(inputs.platforms, 'macos') }}
     name: macos-${{ matrix.job.arch }}
     needs: [generate-bridge]
     runs-on: ${{ matrix.job.os }}
@@ -454,7 +454,7 @@ jobs:
           if-no-files-found: error
 
   build-android:
-    if: ${{ inputs.platforms == 'all' || contains(format(',{0},', replace(inputs.platforms, ' ', '')), ',android,') }}
+    if: ${{ inputs.platforms == 'all' || contains(inputs.platforms, 'android') }}
     name: android-${{ matrix.job.arch }}
     needs: [generate-bridge]
     runs-on: ubuntu-24.04
@@ -610,7 +610,7 @@ jobs:
           if-no-files-found: error
 
   build-ios:
-    if: ${{ inputs.platforms == 'all' || contains(format(',{0},', replace(inputs.platforms, ' ', '')), ',ios,') }}
+    if: ${{ inputs.platforms == 'all' || contains(inputs.platforms, 'ios') }}
     name: ios-aarch64
     needs: [generate-bridge]
     runs-on: macos-latest
@@ -756,7 +756,9 @@ jobs:
             exit 1
           fi
           if ! gh release view "$TAG_NAME" >/dev/null 2>&1; then
-            gh release create "$TAG_NAME" --draft --prerelease               --title "Remote Desk ${VERSION}"               --notes "Unsigned/debug-signed Remote Desk ${VERSION} builds from this fork."
+            gh release create "$TAG_NAME" --draft --prerelease \
+              --title "Remote Desk ${VERSION}" \
+              --notes "Unsigned/debug-signed Remote Desk ${VERSION} builds from this fork."
           fi
           # --clobber overwrites same-named files only; other assets (e.g. Android/iOS
           # already on this draft) are left in place.
