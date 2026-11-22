@@ -753,6 +753,8 @@ jobs:
       - name: Attach artifacts to draft release without removing existing assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # This job has no checkout, so gh cannot infer the repo from git.
+          GH_REPO: alanza84/remote-desk
         run: |
           set -euo pipefail
           mapfile -t files < <(find artifacts -type f | sort)
@@ -760,12 +762,12 @@ jobs:
             echo "No artifacts to upload"
             exit 1
           fi
-          if ! gh release view "$TAG_NAME" >/dev/null 2>&1; then
-            gh release create "$TAG_NAME" --draft --prerelease \
+          if ! gh release view "$TAG_NAME" -R "$GH_REPO" >/dev/null 2>&1; then
+            gh release create "$TAG_NAME" -R "$GH_REPO" --draft --prerelease \
               --title "Remote Desk ${VERSION}" \
               --notes "Unsigned/debug-signed Remote Desk ${VERSION} builds from this fork."
           fi
           # --clobber overwrites same-named files only; other assets (e.g. Android/iOS
           # already on this draft) are left in place.
-          gh release upload "$TAG_NAME" "${files[@]}" --clobber
-          gh release view "$TAG_NAME" --json assets --jq '.assets[].name'
+          gh release upload "$TAG_NAME" "${files[@]}" --clobber -R "$GH_REPO"
+          gh release view "$TAG_NAME" -R "$GH_REPO" --json assets --jq '.assets[].name'
