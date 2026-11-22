@@ -70,7 +70,12 @@ jobs:
       target_version: Windows10
 
   build-windows:
-    if: ${{ inputs.platforms == 'all' || contains(inputs.platforms, 'windows') }}
+    # always() so a failed ARM64 topmost matrix leg does not skip x64 (or vice versa).
+    # Each matrix job still fails on its own if its topmost artifact is missing.
+    if: >-
+      ${{ always() && !cancelled()
+          && (inputs.platforms == 'all' || contains(inputs.platforms, 'windows'))
+          && needs.generate-bridge.result == 'success' }}
     name: windows-${{ matrix.job.arch }}
     needs: [build-topmost-window, generate-bridge]
     runs-on: ${{ matrix.job.os }}

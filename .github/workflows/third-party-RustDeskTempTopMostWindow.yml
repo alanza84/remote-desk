@@ -40,15 +40,38 @@ jobs:
     steps:
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@6fb02220983dee41ce7ae257b6f4d8f9bf5ed4ce # v2
+        with:
+          # Default is x86, which selects HostX86\\arm64\\CL.exe on windows-11-arm
+          # and hits C3859/C1076 (PCH / compiler heap limit).
+          msbuild-architecture: ${{ inputs.platform == 'ARM64' && 'arm64' || 'x64' }}
 
       - name: Download the source code
         run: |
           git clone https://github.com/rustdesk-org/RustDeskTempTopMostWindow RustDeskTempTopMostWindow
 
       - name: Build the project
+        shell: pwsh
         run: |
-          cd RustDeskTempTopMostWindow && git checkout ecd8d6a139eee76845ea66423fb739af450fda90
-          msbuild ${{ env.project_path }} -p:Configuration=${{ inputs.configuration }} -p:Platform=${{ inputs.platform }} /p:TargetVersion=${{ inputs.target_version }}
+          Set-Location RustDeskTempTopMostWindow
+          git checkout ecd8d6a139eee76845ea66423fb739af450fda90
+          $msbuildArgs = @(
+            "${{ env.project_path }}",
+            "-p:Configuration=${{ inputs.configuration }}",
+            "-p:Platform=${{ inputs.platform }}",
+            "/p:TargetVersion=${{ inputs.target_version }}",
+            "/p:PreferredToolArchitecture=${{ inputs.platform == 'ARM64' && 'ARM64' || 'x64' }}"
+          )
+          if ("${{ inputs.platform }}" -eq "ARM64") {
+            # Item-level <PrecompiledHeader> in the vcxproj is not overridden by
+            # /p:PrecompiledHeader, so patch it off and compile single-threaded.
+            $proj = "${{ env.project_path }}"
+            $content = Get-Content -Raw $proj
+            $content = $content -replace '<PrecompiledHeader[^>]*>Use</PrecompiledHeader>', '<PrecompiledHeader>NotUsing</PrecompiledHeader>'
+            $content = $content -replace '<PrecompiledHeader[^>]*>Create</PrecompiledHeader>', '<PrecompiledHeader>NotUsing</PrecompiledHeader>'
+            Set-Content -Path $proj -Value $content -NoNewline
+            $msbuildArgs += @("/m:1", "/p:CL_MPCount=1")
+          }
+          msbuild @msbuildArgs
 
       - name: Archive build artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
